@@ -1,0 +1,4 @@
+hydra-core==1.3.4
+pydantic
+huggingface_hub
+tqdm
