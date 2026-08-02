@@ -43,7 +43,7 @@ class _DistInfo(BaseModel):
 dist_info: _DistInfo | None = None
 
 
-def get_dist_info():
+def get_info():
     global dist_info
     if dist_info is None:
         has_cuda = torch.cuda.is_available()
@@ -57,6 +57,15 @@ def get_dist_info():
         )
     return dist_info
 
+@contextmanager
+def rank0_first():
+    rank = dist.get_rank()
+    if rank == 0:
+        yield
+    dist.barrier()
+    if rank > 0:
+        yield
+    dist.barrier()
 
 @contextmanager
 def distributed():
@@ -67,14 +76,26 @@ def distributed():
         _destroy_dist()
 
 
-def dist_model(model: torch.nn.Module, local_rank: int):
+def preapre_model(model: torch.nn.Module, local_rank: int):
     if dist.is_initialized():
         return DistributedDataParallel(model, device_ids=[local_rank])
     return model
 
+def broadcast_object(object, src):
+    di = get_info()
+    l = [None]
+    if di.rank == src:
+        l = [object]
+
+    if di.world_size > 1:
+        dist.broadcast_object_list(l, src=src)
+
+    assert l[0] is not None
+    return l[0]
+
 
 # Replicate DataLoader common args so LSP can suggest it.
-def dist_dataloader(
+def prepare_dataloader(
     *,
     dataset,
     batch_size: int | None = 1,
@@ -132,7 +153,7 @@ def zero_optimizer(
 
 def _init_distribution():
     has_cuda = torch.cuda.is_available()
-    di = get_dist_info()
+    di = get_info()
     if has_cuda:
         torch.cuda.set_device(di.device)
         dist.init_process_group(
@@ -168,17 +189,17 @@ def _test():
     except Exception:
         logging.basicConfig(
             level=logging.INFO,
-            format=f"[rank={get_dist_info().rank}] [%(asctime)s] %(levelname)s:%(message)s",
+            format=f"[rank={get_info().rank}] [%(asctime)s] %(levelname)s:%(message)s",
             handlers=[logging.StreamHandler()],
         )
 
     with distributed() as di:
         logging.info(str(di))
         model = torch.nn.Linear(3, 3).to(di.device)
-        model = dist_model(model, di.local_rank)
+        model = preapre_model(model, di.local_rank)
         print(model)
         print(type(model))
-        loader = dist_dataloader(
+        loader = prepare_dataloader(
             dataset=data,
             batch_size=5,
             shuffle=True,
@@ -196,6 +217,8 @@ def _test():
             print(vars(zero_opt.optim))  # type: ignore
         else:
             print(vars(zero_opt))
+
+
 
 
 if __name__ == "__main__":
