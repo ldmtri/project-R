@@ -1,0 +1,40 @@
+run_name: null
+seed: 1
+use_wandb: false
+
+
+dataset:
+  type: sudoku
+  source_repo: sapientinc/sudoku-extreme
+  output_dir: data/sudoku-extreme
+  subsample_size: 1000
+  min_difficulty: null
+  num_aug: 1000
+
+trainer:
+  batch_size: 50
+  lr: 1e-5
+  optimizer_cfg:
+    betas:
+      - 0.9 # beta1
+      - 0.95 # beta2
+    weight_decay: 0.1
+  total_steps: 100000
+  warmup_steps: 2000
+
+
+tester:
+  batch_size: 50
+
+model:
+  text: this is model config
+
+hydra:
+  run:
+    dir: outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+  # verbose: True
+
+wandb:
+  used: ${use_wandb}
+  entity: triyn01052004-vietnam-national-university-hanoi
+  project: project-R

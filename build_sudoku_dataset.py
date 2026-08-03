@@ -1,21 +1,28 @@
-import sys
 import os
 import csv
 import numpy as np
 import hydra
-import json
-from hashlib import sha1
-from pydantic import BaseModel
 from tqdm import tqdm
 from huggingface_hub import hf_hub_download
 import logging
+from pydantic import BaseModel
+import json
+from hashlib import sha1
+from pathlib import Path
+from torch.utils.data import Dataset
+import torch
+from typing import Dict
 
-sys.path.append(".")
 
-from utils import save_to_file, init_logging  # type: ignore
+from utils import (
+    save_to_file,
+    load_from_file,
+    u_logging,
+    u_hydra
+)
 
 
-class DataProcessConfig(BaseModel):
+class SudokuDatasetConfig(BaseModel):
     source_repo: str
     output_dir: str
     final_output_dir: str | None = None
@@ -37,7 +44,6 @@ class DataProcessConfig(BaseModel):
             separators=(",", ":"),
         )
         return sha1(payload.encode()).hexdigest()[:8]
-
 
 def shuffle_sudoku(board: np.ndarray, solution: np.ndarray):
     # Create a random digit mapping: a permutation of 1..9, with zero (blank) unchanged.
@@ -72,7 +78,7 @@ def shuffle_sudoku(board: np.ndarray, solution: np.ndarray):
     return apply_transformation(board), apply_transformation(solution)
 
 
-def convert_subset(set_name: str, config: DataProcessConfig):
+def convert_subset(set_name: str, config: SudokuDatasetConfig):
     # Read CSV
     inputs = []
     labels = []
@@ -164,12 +170,12 @@ def convert_subset(set_name: str, config: DataProcessConfig):
 
 @hydra.main(
     version_base=None,
-    config_path="../config",
-    config_name="build-data",
+    config_path=".",
+    config_name="config",
 )
 def preprocess_data(cfg):
-    cfg = DataProcessConfig(**cfg.dataset)
-    init_logging(os.path.join(cfg.final_output_dir, "build_data.log"))  # type: ignore
+    cfg = SudokuDatasetConfig(**cfg.dataset)
+    u_logging.init(os.path.join(cfg.final_output_dir, "build_data.log"))  # type: ignore
     convert_subset("train", cfg)
     convert_subset("test", cfg)
 
@@ -181,6 +187,43 @@ def preprocess_data(cfg):
         mode="json",
     )
 
+class SudokuDataset(Dataset):
+    def __init__(self, features):
+        self.inputs = torch.tensor(features["inputs"])
+        self.labels = torch.tensor(features["labels"])
+        self.puzzle_indices = torch.tensor(features["puzzle_indices"])
+
+    def __len__(self):
+        return len(self.inputs)
+
+    def __getitem__(self, index):
+        out = {
+            "input": self.inputs[index],
+            "label": self.labels[index],
+            "puzzle_indices": self.puzzle_indices[index]
+        }
+        return out
+
+def load_data(cfg) -> Dict[str, SudokuDataset]:
+    cfg = SudokuDatasetConfig(**cfg)
+    output = {"train": None, "test": None}
+    assert cfg.final_output_dir is not None
+    dir = Path(cfg.final_output_dir)
+    for k in output.keys():
+        files = {
+            "inputs": None,
+            "labels": None,
+            "puzzle_indices": None,
+        }
+        set_dir = dir / k
+        for file in files.keys():
+            path = set_dir / f"all__{file}.npy"
+            content = load_from_file(path, "numpy")
+            files[file] = content
+        output[k] = SudokuDataset(files)
+
+    return output # type: ignore
 
 if __name__ == "__main__":
+    u_hydra.set_no_output()
     preprocess_data()

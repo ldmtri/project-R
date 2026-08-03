@@ -30,6 +30,13 @@ use '@record' to save errors of workers into file.
 """
 
 
+def __getattr__(name: str):
+    if name == "info":
+        return get_info()
+
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
 class _DistInfo(BaseModel):
     # Enable arbitrary types for this specific model, fix torch.device
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -57,6 +64,7 @@ def get_info():
         )
     return dist_info
 
+
 @contextmanager
 def rank0_first():
     rank = dist.get_rank()
@@ -67,6 +75,7 @@ def rank0_first():
         yield
     dist.barrier()
 
+
 @contextmanager
 def distributed():
     dist_info = _init_distribution()
@@ -76,10 +85,12 @@ def distributed():
         _destroy_dist()
 
 
-def preapre_model(model: torch.nn.Module, local_rank: int):
+def prepare_model(model: torch.nn.Module):
     if dist.is_initialized():
+        local_rank = get_info().local_rank
         return DistributedDataParallel(model, device_ids=[local_rank])
     return model
+
 
 def broadcast_object(object, src):
     di = get_info()
@@ -177,6 +188,7 @@ def _destroy_dist():
 # TEST:
 @record
 def _test():
+    # remember to call dataloader.sampler.set_epoch(state["epoch"])
     from torch.utils.data import TensorDataset
     from torch.optim import AdamW
 
@@ -196,7 +208,7 @@ def _test():
     with distributed() as di:
         logging.info(str(di))
         model = torch.nn.Linear(3, 3).to(di.device)
-        model = preapre_model(model, di.local_rank)
+        model = prepare_model(model, di.local_rank)
         print(model)
         print(type(model))
         loader = prepare_dataloader(
@@ -217,8 +229,6 @@ def _test():
             print(vars(zero_opt.optim))  # type: ignore
         else:
             print(vars(zero_opt))
-
-
 
 
 if __name__ == "__main__":

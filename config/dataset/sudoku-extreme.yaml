@@ -1,5 +1,0 @@
-source_repo: sapientinc/sudoku-extreme
-output_dir: data/sudoku-extreme
-subsample_size: 1000
-min_difficulty: null
-num_aug: 1000
